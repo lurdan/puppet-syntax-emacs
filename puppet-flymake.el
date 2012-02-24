@@ -31,5 +31,5 @@
 
 (add-hook 'puppet-mode-hook 'flymake-puppet-load)
 
-(provide 'flymake-puppet)
+(provide 'puppet-flymake)
 
