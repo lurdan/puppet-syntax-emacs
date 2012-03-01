@@ -40,6 +40,8 @@
 If you copy the puppet reference to your local system, set this variable
 to something like \"file:/usr/local/doc/puppet/\".")
 
+(defvar puppet-doc-root-local "/etc/puppet/doc")
+
 (defvar puppet-doc-history nil
   "History of symbols looked up.")
 
@@ -64,7 +66,7 @@ variable `puppet-doc-root' to point to that location."
 					     puppet-doc-symbols))
                            symbol-at-point
 			 (completing-read
-			  "Look up KEYWORD in Puppet reference: "
+			  "Look up KEYWORD of puppet: "
 			  puppet-doc-symbols #'boundp
 			  t symbol-at-point
 			  'puppet-doc-history)))))
@@ -77,7 +79,7 @@ variable `puppet-doc-root' to point to that location."
                                       puppet-doc-symbols)))
              (if (and symbol (boundp symbol))
                  (symbol-value symbol)
-               (error "The KEYWORD `%s' is not defined in Puppet reference."
+               (error "The KEYWORD `%s' is not defined in puppet reference."
                       symbol-name)))))
 
 (with-temp-buffer
