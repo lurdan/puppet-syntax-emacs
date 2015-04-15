@@ -1,10 +1,31 @@
-;;;
-;;; puppet-mode.el
-;;;
-;;; Author: lutter
-;;; Author: Russ Allbery <rra@stanford.edu>
-;;;
-;;; Description: A simple mode for editing puppet manifests
+;;; puppet-mode.el --- A simple mode for editing puppet manifests
+
+;; Copyright (C) 2011 Puppet Labs Inc
+
+;; Author: Russ Allbery <rra@stanford.edu>
+;; Maintainer: <info@puppetlabs.com>
+
+;; This file is not part of GNU Emacs.
+
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+
+;;; Commentary:
+
+;; A simple mode for editing puppet manifests.
+
+;;; Code:
+
+(require 'align)
 
 (defconst puppet-mode-version "0.2")
 
@@ -23,8 +44,10 @@
 
 (defvar puppet-mode-map
   (let ((map (make-sparse-keymap)))
-    (define-key map "\C-j" 'newline-and-indent)
-    (define-key map "\C-m" 'newline-and-indent)
+    (define-key map "\C-j"     'newline-and-indent)
+    (define-key map "\C-m"     'newline-and-indent)
+    (define-key map "\C-c\C-c" 'compile)
+    (define-key map "\C-c\C-q" 'puppet-indent-and-align-resource)
     map)
   "Key map used in puppet-mode buffers.")
 
@@ -66,6 +89,10 @@ of Emacs."
       (goto-char start)
       (while (re-search-forward re end t) (setq n (1+ n)))
       n)))
+
+(defcustom puppet-manifest-verify-command "puppet parser validate --color=no"
+  "Command to use when checking a manifest syntax"
+  :type 'string :group 'puppet)
 
 (defun puppet-comment-line-p ()
   "Return non-nil iff this line is a comment."
@@ -139,6 +166,7 @@ of the initial include plus puppet-include-indent."
   "Indent current line as puppet code."
   (interactive)
   (beginning-of-line)
+  (align-current)                       ; Always align attributes
   (if (bobp)
       (indent-line-to 0)                ; First line is always non-indented
     (let ((not-indented t)
@@ -186,6 +214,16 @@ of the initial include plus puppet-include-indent."
         ;; comma and we're at the inner block, so we should indent it matching
         ;; the indentation of the opening brace of the block.
         (setq cur-indent block-indent))
+       ((looking-at "^\\s-*}\\s-*\\(else\\|elsif\\)")
+        ;; This line contains a closing brace and the else or elsif keywords,
+        ;; so we should indent it matching the indentation of the opening
+        ;; brace of the block.
+        (setq cur-indent block-indent))
+       ((looking-at "^[^\n\({]*\)\\s-*\\(inherits\\s-+[a-zA-Z0-9_:-]*\\s-*\\)?{\\s-*$")
+        ;; Closing paren, optionally followed by the inherits keyword and a
+        ;; class name and another brace will be indented one level too much.
+        (setq cur-indent (- (current-indentation) puppet-indent-level))
+        (setq not-indented nil))
        (t
         ;; Otherwise, we did not start on a block-ending-only line.
         (save-excursion
@@ -198,6 +236,18 @@ of the initial include plus puppet-include-indent."
              ((puppet-comment-line-p)
               (if (bobp)
                   (setq not-indented nil)))
+
+             ;; Indent by one level more if the line ends with an open brace
+             ;; after the else or elsif keywords.
+             ((looking-at "^.*\\(else\\|elsif.*\\)\\s-*{\\s-*$")
+              (setq cur-indent (+ (current-indentation) puppet-indent-level))
+              (setq not-indented nil))
+
+             ;; Indent by one level more if the line ends with an open brace
+             ;; after the inherits keyword.
+             ((looking-at "^[^\n\({]*\)\\s-*\\(inherits\\s-+[a-zA-Z0-9_:-]*\\s-*\\)?{\\s-*$")
+              (setq cur-indent (+ (current-indentation) puppet-indent-level))
+              (setq not-indented nil))
 
              ;; Brace or paren on a line by itself will already be indented to
              ;; the right level, so we can cheat and stop there.
@@ -250,6 +300,18 @@ of the initial include plus puppet-include-indent."
           (indent-line-to cur-indent)
         (indent-line-to 0)))))
 
+(defun puppet-mode-compilation-buffer-name (&rest ignore)
+  "Return the name of puppet compilation buffer"
+  "*puppet-lint*")
+
+(defun puppet-indent-and-align-resource ()
+  "Indent and align the current puppet resource declaration."
+  (interactive "*")
+  (save-excursion
+    (mark-defun)
+    (indent-region (region-beginning) (region-end))
+    (align (region-beginning) (region-end))))
+
 (defvar puppet-font-lock-syntax-table
   (let* ((tbl (copy-syntax-table puppet-mode-syntax-table)))
     (modify-syntax-entry ?_ "w" tbl)
@@ -263,63 +325,130 @@ of the initial include plus puppet-include-indent."
    ;; inheritence
    '("\\s +inherits\\s +\\([^( \t\n]+\\)"
      1 font-lock-function-name-face)
-   ;; include
-   '("\\(^\\|\\s +\\)include\\s +\\(\\([a-zA-Z0-9:_-]+\\(,[ \t\n]*\\)?\\)+\\)"
-     2 font-lock-reference-face)
-   ;; keywords
-   (cons (concat
-          "\\b\\(\\("
-          (mapconcat
-           'identity
-           '("alert"
-             "case"
-             "class"
-             "crit"
-             "debug"
-             "default"
-             "define"
-             "defined"
-             "else"
-             "emerg"
-             "err"
-             "fail"
-             "false"
-             "file"
-             "filebucket"
-             "generate"
-             "if"
-             "import"
-             "include"
-             "info"
-             "inherits"
-             "node"
-             "notice"
-             "realize"
-             "search"
-             "tag"
-             "tagged"
-             "template"
-             "true"
-             "warning"
-             )
-           "\\|")
-          "\\)\\>\\)")
-         1)
-     ;; variables
-     '("\\(^\\|[^_:.@$]\\)\\b\\(true\\|false\\)\\>"
-       2 font-lock-variable-name-face)
-     '("\\$[a-zA-Z0-9_:]+"
-       0 font-lock-variable-name-face)
-     ;; usage of types
-     '("^\\s *\\([a-z][a-zA-Z0-9_:-]*\\)\\s +{"
-       1 font-lock-type-face)
-     ;; overrides and type references
-     '("\\s +\\([A-Z][a-zA-Z0-9_:-]*\\)\\["
-       1 font-lock-type-face)
-     ;; general delimited string
-     '("\\(^\\|[[ \t\n<+(,=]\\)\\(%[xrqQwW]?\\([^<[{(a-zA-Z0-9 \n]\\)[^\n\\\\]*\\(\\\\.[^\n\\\\]*\\)*\\(\\3\\)\\)"
-       (2 font-lock-string-face)))
+   ;; include & require
+   '("\\(^\\|\\s +\\)\\(include\\|require\\)\\s +\\(\\([a-zA-Z0-9:_-]+\\(,[ \t\n]*\\)?\\)+\\)"
+     3 font-lock-reference-face)
+   ;; constants
+   '("\\(^\\|[^_:.@$]\\)\\b\\(true\\|false\\|undef\\)\\>"
+     2 font-lock-constant-face)
+   ;; parameters with hash rockets
+   ;; (borrow the preprocessor face for this case)
+   '("\\([a-z][a-z0-9_]*\\)[ \t\n]*=>"
+     1 font-lock-preprocessor-face)
+   ;; values for parameter 'ensure' with hash rocket
+   (list (concat "ensure[ \t\n]*=>[ \t\n]*"
+                 (regexp-opt '("absent"
+                               "configured"
+                               "defined"
+                               "directory"
+                               "false"
+                               "file"
+                               "held"
+                               "installed"
+                               "latest"
+                               "link"
+                               "mounted"
+                               "no_shutdown"
+                               "present"
+                               "purged"
+                               "role"
+                               "running"
+                               "shutdown"
+                               "stopped"
+                               "true"
+                               "unmounted") 'words))
+         1 'font-lock-constant-face)
+   ;; variables
+   '("\\$[a-zA-Z0-9_:]+"
+     0 font-lock-variable-name-face)
+   ;; keywords (important)
+   (list (regexp-opt
+          '("alert"
+            "crit"
+            "debug"
+            "emerg"
+            "err"
+            "fail"
+            "info"
+            "notice"
+            "warning") 'words)
+         0 'font-lock-warning-face)
+   ;; keywords (normal)
+   (list (regexp-opt
+          '("and"
+            "case"
+            "class"
+            "contain"
+            "create_resources"
+            "default"
+            "define"
+            "defined"
+            "each"
+            "else"
+            "elsif"
+            "epp"
+            "err"
+            "extlookup"
+            "false"
+            "file"
+            "filebucket"
+            "filter"
+            "fqdn_rand"
+            "generate"
+            "hiera"
+            "hiera_array"
+            "hiera_hash"
+            "hiera_include"
+            "if"
+            "import"
+            "in"
+            "include"
+            "inherits"
+            "inline_epp"
+            "inline_template"
+            "lookup"
+            "map"
+            "md5"
+            "node"
+            "or"
+            "realize"
+            "reduce"
+            "regsubst"
+            "require"
+            "search"
+            "sha1"
+            "shellquote"
+            "slice"
+            "split"
+            "sprintf"
+            "tag"
+            "tagged"
+            "template"
+            "true"
+            "undef"
+            "unless"
+            "versioncmp")
+          'words)
+         1 'font-lock-keyword-face)
+   ;; usage of types
+   '("^\\s *\\(@\\{,2\\}\\(::\\)?[a-z][a-zA-Z0-9_:-]*\\)\\s +{"
+     1 font-lock-type-face)
+   ;; overrides and type references
+   '("\\(\\s +\\|\\s(\\)\\([A-Z][a-zA-Z0-9_:-]*\\)\\["
+     2 font-lock-type-face)
+   ;; general delimited string
+   '("\\(^\\|[[ \t\n<+(,=]\\)\\(%[xrqQwW]?\\([^<[{(a-zA-Z0-9 \n]\\)[^\n\\\\]*\\(\\\\.[^\n\\\\]*\\)*\\(\\3\\)\\)"
+     (2 font-lock-string-face)))
   "*Additional expressions to highlight in puppet mode.")
+
+(defvar puppet-align-rules
+  '((puppet-align
+     (modes   . '(puppet-mode))
+     (regexp  . "\\(\\s-*\\)=>\\(\\s-*\\)")
+     (group   1 2)
+     (spacing . 1)
+     (repeat  . t)))
+  "*Rules to align code in puppet mode.")
 
 ;;;###autoload
 (defun puppet-mode ()
@@ -344,8 +473,10 @@ The variable puppet-indent-level controls the amount of indentation.
   (set (make-local-variable 'indent-tabs-mode) puppet-indent-tabs-mode)
   (set (make-local-variable 'require-final-newline) t)
   (set (make-local-variable 'paragraph-ignore-fill-prefix) t)
-  (set (make-local-variable 'paragraph-start) "\f\\|[ 	]*$\\|#$")
-  (set (make-local-variable 'paragraph-separate) "\\([ 	\f]*\\|#\\)$")
+  (set (make-local-variable 'paragraph-start) "\f\\|[   ]*$\\|#$")
+  (set (make-local-variable 'paragraph-separate) "\\([  \f]*\\|#\\)$")
+  (set (make-local-variable 'open-paren-in-column-0-is-defun-start) t)
+  (set (make-local-variable 'defun-prompt-regexp) "^\\s-*\\(class\\|define\\|node\\)\\s-+[a-z][^{]*")
   (or (boundp 'font-lock-variable-name-face)
       (setq font-lock-variable-name-face font-lock-type-face))
   (set (make-local-variable 'font-lock-keywords) puppet-font-lock-keywords)
@@ -354,6 +485,11 @@ The variable puppet-indent-level controls the amount of indentation.
        '((puppet-font-lock-keywords) nil nil))
   (set (make-local-variable 'font-lock-syntax-table)
        puppet-font-lock-syntax-table)
+  (set (make-local-variable 'compilation-buffer-name-function) 'puppet-mode-compilation-buffer-name)
+  (set (make-local-variable 'compile-command) (concat puppet-manifest-verify-command " " (buffer-file-name)))
+  (dolist (ar puppet-align-rules) (add-to-list 'align-rules-list ar))
   (run-hooks 'puppet-mode-hook))
 
 (provide 'puppet-mode)
+
+;;; puppet-mode.el ends here
