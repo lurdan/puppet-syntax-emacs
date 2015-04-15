@@ -33,6 +33,7 @@
 (require 'cl-lib)
 (require 'browse-url)
 (require 'thingatpt)
+(require 'url-cache)
 
 (defvar puppet-doc-root
   "http://docs.puppetlabs.com/references/latest"
@@ -40,18 +41,23 @@
 If you copy the puppet reference to your local system, set this variable
 to something like \"file:/usr/local/doc/puppet/\".")
 
+;; TODO: implement the way to refer local documentation.
 (defvar puppet-doc-root-local "/etc/puppet/doc")
+
+(defvar puppet-doc-index-file "~/.emacs.d/var/puppet-doc-index.el")
+
+(defvar puppet-doc-cache-dir "~/.emacs.d/var/puppet")
+
+;; variables for internal use
 
 (defvar puppet-doc-history nil
   "History of symbols looked up.")
-
-;;if only we had had packages or hash tables..., but let's fake it.
 
 (defvar puppet-doc-symbols (make-vector 400 0))
 
 (defvar puppet-doc-index nil)
 
-(defvar puppet-doc-index-file "~/.emacs.d/var/puppet-doc-index.el")
+;; functions for internal use
 
 (defun puppet-doc-init ()
   "Initialize internal settings."
@@ -64,6 +70,17 @@ to something like \"file:/usr/local/doc/puppet/\".")
                   (push (cadr entry) (symbol-value symbol))
                 (set symbol (cdr entry))))) puppet-doc-index))
 
+(defun puppet-doc-cache (url)
+  "Convert given `URL' to its cache."
+  (let* ((split-list (split-string url "#"))
+         (url (nth 0 split-list))
+         (anchor (nth 1 split-list))
+         (cache-file (concat (url-cache-create-filename url) ".html")))
+    (unless (file-exists-p cache-file)
+      (url-copy-file url cache-file t t))
+    (concat "file://" cache-file "#" anchor)
+    ))
+
 ;;;###autoload
 (defun puppet-doc (keyword)
   "View the documentation on `KEYWORD' from the Puppet documentation.
@@ -74,29 +91,31 @@ function to view the separate definitions.
 Puppet documentaion is provided by Puppetlabs. If you copy Puppet
 documentation to another location, customize the
 variable `puppet-doc-root' to point to that location."
-  (interactive (list (let ((symbol-at-point (thing-at-point 'symbol)))
+  (interactive (list (let* ((symbol-at-point (thing-at-point 'symbol))
+                            (candidate (if symbol-at-point
+                                           (downcase symbol-at-point) nil)))
                        (unless puppet-doc-index
                          (puppet-doc-init))
-                       (if (and symbol-at-point
-				(intern-soft (downcase symbol-at-point)
+                       (if (and candidate
+				(intern-soft candidate
                                              puppet-doc-symbols))
-                           symbol-at-point
+                           candidate
                          (completing-read
                           "Look up KEYWORD of puppet: "
                           puppet-doc-symbols #'boundp
-                          t symbol-at-point
+                          t candidate
                           'puppet-doc-history)))))
   (cl-maplist (lambda (entry)
-             (browse-url (concat puppet-doc-root "/" (car entry))
-                         browse-url-new-window-flag)
-             (if (cdr entry)
-                 (sleep-for 1.5)))
-           (let ((symbol (intern-soft (downcase keyword)
-                                      puppet-doc-symbols)))
-             (if (and symbol (boundp symbol))
-                 (symbol-value symbol)
-               (error "The KEYWORD `%s' is not defined in puppet reference"
-                      keyword)))))
+                (browse-url (puppet-doc-cache (concat puppet-doc-root "/" (car entry)))
+                            browse-url-new-window-flag)
+                (if (cdr entry)
+                    (sleep-for 1.5)))
+              (let ((symbol (intern-soft (downcase keyword)
+                                         puppet-doc-symbols)))
+                (if (and symbol (boundp symbol))
+                    (symbol-value symbol)
+                  (error "The KEYWORD  `%s' is not defined in puppet reference"
+                         keyword)))))
 
 (provide 'puppet-doc)
 
