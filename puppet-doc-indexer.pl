@@ -6,18 +6,25 @@ use warnings;
 use WWW::Mechanize;
 use Web::Scraper;
 
+my %xpath = (
+  "configuration" => "nav/ol/li/ol/li/a",
+  "metaparameter" => "nav/ol/li/ol/li/a",
+  "type"          => "div[2]/nav/ol/li/a",
+  "indirection"   => "nav/ol/li/a",
+  "report"        => "nav/ol/li/a",
+  "function"      => "nav/ol/li/a",
+);
+
 print "(\n";
-for my $reftype ("configuration", "metaparameter", "type") {
-  fetch_index ($reftype, '/html/body/section[2]/div/div/div[2]/div/ol/li/ol/li/a');
-}
-for my $reftype ("function", "indirection", "network", "report") {
-  fetch_index ($reftype, '/html/body/section[2]/div/div/div[2]/div/ol/li/a');
+while (my ($reftype, $xpath) = each(%xpath)) {
+  fetch_index ($reftype, "/html/body/section[2]/div/div/div/$xpath");
 }
 print ")\n";
 
 sub fetch_index {
   my $ref = $_[0];
   my $xpath = $_[1];
+
   my $mech = new WWW::Mechanize( autocheck => 1 );
   $mech->get("http://docs.puppetlabs.com/references/latest/${ref}.html");
 

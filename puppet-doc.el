@@ -1,6 +1,6 @@
 ;;; puppet-doc.el --- Browse documentation for Puppet
 
-;; Copyright 2011 KURASHIKI Satoru
+;; Copyright 2011-2015 KURASHIKI Satoru
 
 ;; Author: KURASHIKI Satoru <lurdan@gmail.com>
 ;; Keywords: puppet
@@ -30,12 +30,12 @@
 
 ;;; Code:
 
-(require 'cl)
+(require 'cl-lib)
 (require 'browse-url)
 (require 'thingatpt)
 
 (defvar puppet-doc-root
-    "http://docs.puppetlabs.com/references/latest/"
+  "http://docs.puppetlabs.com/references/latest"
   "The root of the puppet reference URL.
 If you copy the puppet reference to your local system, set this variable
 to something like \"file:/usr/local/doc/puppet/\".")
@@ -47,13 +47,27 @@ to something like \"file:/usr/local/doc/puppet/\".")
 
 ;;if only we had had packages or hash tables..., but let's fake it.
 
-(defvar puppet-doc-symbols (make-vector 67 0))
+(defvar puppet-doc-symbols (make-vector 400 0))
 
-(defvar puppet-doc-index-file "~/.emacs.d/tmp/puppet-doc-index.el")
+(defvar puppet-doc-index nil)
 
-(defun puppet-doc (symbol-name)
-  "View the documentation on KEYWORD from the Puppet documentation.
-If KEYWORD has more than one definition, all of them are displayed with
+(defvar puppet-doc-index-file "~/.emacs.d/var/puppet-doc-index.el")
+
+(defun puppet-doc-init ()
+  "Initialize internal settings."
+  (with-temp-buffer
+    (insert-file-contents puppet-doc-index-file)
+    (setq puppet-doc-index (read (buffer-string))))
+  (mapcar (lambda (entry)
+            (let ((symbol (intern (car entry) puppet-doc-symbols)))
+              (if (boundp symbol)
+                  (push (cadr entry) (symbol-value symbol))
+                (set symbol (cdr entry))))) puppet-doc-index))
+
+;;;###autoload
+(defun puppet-doc (keyword)
+  "View the documentation on `KEYWORD' from the Puppet documentation.
+If `KEYWORD' has more than one definition, all of them are displayed with
 your favorite browser in sequence.  The browser should have a \"back\"
 function to view the separate definitions.
 
@@ -61,38 +75,29 @@ Puppet documentaion is provided by Puppetlabs. If you copy Puppet
 documentation to another location, customize the
 variable `puppet-doc-root' to point to that location."
   (interactive (list (let ((symbol-at-point (thing-at-point 'symbol)))
-		       (if (and symbol-at-point
+                       (unless puppet-doc-index
+                         (puppet-doc-init))
+                       (if (and symbol-at-point
 				(intern-soft (downcase symbol-at-point)
-					     puppet-doc-symbols))
+                                             puppet-doc-symbols))
                            symbol-at-point
-			 (completing-read
-			  "Look up KEYWORD of puppet: "
-			  puppet-doc-symbols #'boundp
-			  t symbol-at-point
-			  'puppet-doc-history)))))
-  (maplist (lambda (entry)
+                         (completing-read
+                          "Look up KEYWORD of puppet: "
+                          puppet-doc-symbols #'boundp
+                          t symbol-at-point
+                          'puppet-doc-history)))))
+  (cl-maplist (lambda (entry)
              (browse-url (concat puppet-doc-root "/" (car entry))
                          browse-url-new-window-flag)
              (if (cdr entry)
                  (sleep-for 1.5)))
-           (let ((symbol (intern-soft (downcase symbol-name)
+           (let ((symbol (intern-soft (downcase keyword)
                                       puppet-doc-symbols)))
              (if (and symbol (boundp symbol))
                  (symbol-value symbol)
-               (error "The KEYWORD `%s' is not defined in puppet reference."
-                      symbol-name)))))
-
-(with-temp-buffer
- (insert-file-contents puppet-doc-index-file)
- (setq puppet-doc-index (read (buffer-string))))
-
-(mapcar (lambda (entry)
-	  (let ((symbol (intern (car entry) puppet-doc-symbols)))
-	    (if (boundp symbol)
-	      (push (cadr entry) (symbol-value symbol))
-	      (set symbol (cdr entry))))) puppet-doc-index)
+               (error "The KEYWORD `%s' is not defined in puppet reference"
+                      keyword)))))
 
 (provide 'puppet-doc)
 
 ;;; puppet-doc.el ends here
-
